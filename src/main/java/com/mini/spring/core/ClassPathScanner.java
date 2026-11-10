@@ -12,17 +12,17 @@ public class ClassPathScanner {
 
         ClassLoader classLoader = Thread.currentThread().getContextClassLoader(); //获得当前线程的上下文类加载器
         String path = basePackage.replace(".", "/");
-        Set<Class<?>> classSet = new LinkedHashSet<>();  //去重,防止target/classes和target/test-classes各有一份类时返回重复的Class对象
+        Set<Class<?>> classSet = new LinkedHashSet<>();  //Set去重,防止target/classes和target/test-classes各有一份类时返回重复的Class对象
 
         Enumeration<URL> resources = null;
         try {
-            resources = classLoader.getResources(path);
-            while (resources.hasMoreElements()) {
+            resources = classLoader.getResources(path); //用复数形式,因为同一个包可能分布在多个 classpath 位置
+            while (resources.hasMoreElements()) {  //遍历枚举
                 URL url = resources.nextElement();
                 if(!"file".equals(url.getProtocol())){
                     throw new UnsupportedOperationException("暂不支持非file协议(jar):" + url);
                 }
-                File dir = new File(url.toURI());
+                File dir = new File(url.toURI()); //没用getPath(),防止出现中文路径的问题
                 collect(dir, basePackage, classSet, classLoader);
             }
         } catch (IOException | URISyntaxException e) {
@@ -41,7 +41,7 @@ public class ClassPathScanner {
             }else if(f.getName().endsWith(".class")){  //只处理类,其它接口或者jar包不做处理
                 String name = pkg + "." + f.getName().replace(".class","");
                 try{
-                    Class<?> clazz = Class.forName(name, false, cl);
+                    Class<?> clazz = Class.forName(name, false, cl); //initialize设置为false,只加载不初始化
                     if(!clazz.isInterface() && !clazz.isAnnotation() && !clazz.isEnum()
                             && !clazz.isAnonymousClass() && !clazz.isSynthetic()){
                         out.add(clazz);

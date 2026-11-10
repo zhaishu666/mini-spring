@@ -3,3 +3,6 @@ target/
 .idea/
 .workbuddy/
 *.class
+
+# 个人复盘笔记，不进版本库
+notes/
