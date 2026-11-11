@@ -9,10 +9,7 @@ import com.mini.spring.exception.NoUniqueBeanDefinitionException;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class DefaultBeanFactory implements BeanFactory{
@@ -20,9 +17,10 @@ public class DefaultBeanFactory implements BeanFactory{
     private final BeanDefinitionRegistry registry;
     private final Map<String, Object> singletonObjects = new ConcurrentHashMap<>();  //一级缓存
 
-    /*private final Map<String, Object> earlySingletonObjects = new ConcurrentHashMap<>();  //二级缓存
-    private final Map<String, ObjectFactory<?>> singletonFactories = new ConcurrentHashMap<>(); //三级缓存
-    private final Set<String> singletonsCurrentlyInCreation = ConcurrentHashMap.newKeySet();*/
+    private final Map<String, Object> earlySingletonObjects = new ConcurrentHashMap<>();  //二级缓存
+    private final Map<String, ObjectFactory<?>> singletonFactories = new ConcurrentHashMap<>();//三级缓存
+
+    /*private final Set<String> singletonsCurrentlyInCreation = ConcurrentHashMap.newKeySet();*/ //用于抛BeanCurrentlyInCreationException,暂未使用
 
     public DefaultBeanFactory(BeanDefinitionRegistry registry) {
         this.registry = Objects.requireNonNull(registry,"registry不能为null");
@@ -30,11 +28,15 @@ public class DefaultBeanFactory implements BeanFactory{
 
     @Override
     public Object getBean(String name){
-        Object singleton = singletonObjects.get(name);
-
+        Object singleton = singletonObjects.get(name);  //
         if(singleton != null){
             return singleton;
         }
+        Object earlySingleton = getSingleton(name);
+        if(earlySingleton != null){
+            return earlySingleton;
+        }
+
         return createBean(name);
     }
 
@@ -62,15 +64,21 @@ public class DefaultBeanFactory implements BeanFactory{
         if(bd == null) throw new NoSuchBeanDefinitionException("未找到对应的beanDefinition");
         Object instance;
         try {
-            instance = bd.getType().getDeclaredConstructor().newInstance();
-        } catch (ReflectiveOperationException e) { //直接抛出父异常
-            throw new BeanCreationException("bean初始化异常:" + name, e);
+            try {
+                instance = bd.getType().getDeclaredConstructor().newInstance();
+            } catch (ReflectiveOperationException e) { //直接抛出父异常
+                throw new BeanCreationException("bean初始化异常:" + name, e);
+            }
+
+            singletonFactories.put(name, () -> getEarlyReference(name, instance));
+
+            populateBean(instance);  //依赖注入
+            singletonObjects.put(name, instance);
+        } finally {
+            singletonFactories.remove(name);
+            earlySingletonObjects.remove(name);
+            //删除创建中的标记
         }
-
-        //注册三级缓存工厂(v0.3),必须在populateBean()之前完成
-
-        populateBean(instance);
-        singletonObjects.put(name, instance);
         return instance;
     }
 
@@ -81,12 +89,34 @@ public class DefaultBeanFactory implements BeanFactory{
             if(Modifier.isStatic(field.getModifiers())) continue;  //跳过static静态字段
 
             field.setAccessible(true);
-            Object dependency = getBean(field.getType());  //可能会出现循环依赖
+            Object dependency = getBean(field.getType());  //**可能会出现循环依赖**
             try {
                 field.set(instance, dependency); //将依赖对象交给字段
             } catch (IllegalAccessException e) {
                 throw new BeanCreationException("字段无法注入: " + instance.getClass().getName() + "#" + field.getName(), e);
             }
         }
+    }
+
+    private Object getSingleton(String name){
+        Object earlySingleton = earlySingletonObjects.get(name);  //从二级缓存取
+        if(earlySingleton != null) {
+            return earlySingleton;
+        }
+
+        ObjectFactory<?> factory = singletonFactories.get(name); //二级缓存找不到,再从三级缓存找
+        if(factory == null) return null;
+        Object factoryObject = factory.getObject();
+        if(factoryObject == null) return null;  //防御性判断,v0.3下不可达
+        earlySingletonObjects.put(name, factoryObject);
+        singletonFactories.remove(name);  //必须移除三级缓存中的单例
+        return factoryObject;
+    }
+
+    private Object getEarlyReference(String name, Object instance){
+
+        // v0.5 这里用于判断是否命中切面,命中了就返回代理对象
+
+        return instance;
     }
 }
