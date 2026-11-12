@@ -1,6 +1,7 @@
 package com.mini.spring.bean;
 
 import com.mini.spring.annotation.Autowired;
+import com.mini.spring.annotation.PostConstruct;
 import com.mini.spring.core.BeanDefinition;
 import com.mini.spring.core.BeanDefinitionRegistry;
 import com.mini.spring.exception.BeanCreationException;
@@ -8,9 +9,12 @@ import com.mini.spring.exception.NoSuchBeanDefinitionException;
 import com.mini.spring.exception.NoUniqueBeanDefinitionException;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class DefaultBeanFactory implements BeanFactory{
 
@@ -20,6 +24,8 @@ public class DefaultBeanFactory implements BeanFactory{
     private final Map<String, Object> earlySingletonObjects = new ConcurrentHashMap<>();  //二级缓存
     private final Map<String, ObjectFactory<?>> singletonFactories = new ConcurrentHashMap<>();//三级缓存
 
+    private final List<BeanPostProcessor> beanPostProcessors = new CopyOnWriteArrayList<>();
+
     /*private final Set<String> singletonsCurrentlyInCreation = ConcurrentHashMap.newKeySet();*/ //用于抛BeanCurrentlyInCreationException,暂未使用
 
     public DefaultBeanFactory(BeanDefinitionRegistry registry) {
@@ -28,6 +34,7 @@ public class DefaultBeanFactory implements BeanFactory{
 
     @Override
     public Object getBean(String name){
+
         Object singleton = singletonObjects.get(name);  //
         if(singleton != null){
             return singleton;
@@ -42,6 +49,7 @@ public class DefaultBeanFactory implements BeanFactory{
 
     @Override
     public <T> T getBean(Class<T> type) {
+
         List<BeanDefinition> beanDefinitionList = registry.getBeanDefinitions();
         List<String> beanNames = new ArrayList<>();
         for (BeanDefinition bd : beanDefinitionList) {
@@ -60,9 +68,11 @@ public class DefaultBeanFactory implements BeanFactory{
     }
 
     private Object createBean(String name){
+
         BeanDefinition bd = registry.get(name);
         if(bd == null) throw new NoSuchBeanDefinitionException("未找到对应的beanDefinition");
         Object instance;
+        Object exposed;
         try {
             try {
                 instance = bd.getType().getDeclaredConstructor().newInstance();
@@ -70,19 +80,26 @@ public class DefaultBeanFactory implements BeanFactory{
                 throw new BeanCreationException("bean初始化异常:" + name, e);
             }
 
-            singletonFactories.put(name, () -> getEarlyReference(name, instance));
+            final Object rawInstance = instance;
+            singletonFactories.put(name, () -> getEarlyReference(name, rawInstance));  //此时放进去的是lambda表达式,只有在真正调用getObject时才会执行
 
-            populateBean(instance);  //依赖注入
-            singletonObjects.put(name, instance);
+            exposed = rawInstance;  //rawInstance和exposed在有循环依赖和BPP替换时不一致,v0.5处理
+
+            populateBean(exposed);  //依赖注入
+
+            exposed = initializeBean(name, exposed); //初始化
+
+            singletonObjects.put(name, exposed);
         } finally {
             singletonFactories.remove(name);
             earlySingletonObjects.remove(name);
             //删除创建中的标记
         }
-        return instance;
+        return exposed;
     }
 
     private void populateBean(Object instance){
+
         Field[] declaredFields = instance.getClass().getDeclaredFields();  //获取所有声明的字段,包括私有
         for(Field field : declaredFields){
             if(field.getAnnotation(Autowired.class) == null) continue; //跳过未加注解的
@@ -99,6 +116,7 @@ public class DefaultBeanFactory implements BeanFactory{
     }
 
     private Object getSingleton(String name){
+
         Object earlySingleton = earlySingletonObjects.get(name);  //从二级缓存取
         if(earlySingleton != null) {
             return earlySingleton;
@@ -118,5 +136,42 @@ public class DefaultBeanFactory implements BeanFactory{
         // v0.5 这里用于判断是否命中切面,命中了就返回代理对象
 
         return instance;
+    }
+
+    public void addBeanPostProcessor(BeanPostProcessor bpp){
+
+        Objects.requireNonNull(bpp, "添加的BeanPostProcessor不能为null");
+        beanPostProcessors.add(bpp);
+    }
+
+    private Object initializeBean(String beanName, Object bean){
+
+        //不处理BPP返回null的中断语义
+        for(BeanPostProcessor bpp : beanPostProcessors){
+            bean = bpp.postProcessBeforeInitialization(bean, beanName);
+        }
+
+        invokeInitMethod(beanName, bean);
+
+        for(BeanPostProcessor bpp : beanPostProcessors){
+            bean = bpp.postProcessAfterInitialization(bean, beanName);
+        }
+
+        return bean;
+    }
+
+    private void invokeInitMethod(String beanName, Object bean){
+
+        Method[] methods = bean.getClass().getDeclaredMethods();
+        for(Method method : methods){
+            if(method.getAnnotation(PostConstruct.class) == null) continue;
+
+            try {
+                method.setAccessible(true);
+                method.invoke(bean);
+            } catch (IllegalAccessException | InvocationTargetException | IllegalArgumentException e) {
+                throw new BeanCreationException("初始化方法执行失败: " + beanName + "#" + method.getName(), e);
+            }
+        }
     }
 }
