@@ -11,4 +11,10 @@ public class GreetingServiceImpl implements GreetingService{
     public String greet(String name) {
         return "hi " + name;
     }
+
+    @Timed
+    @Override
+    public String boom() {
+        throw new IllegalArgumentException("boom");
+    }
 }

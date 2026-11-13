@@ -194,11 +194,11 @@ public class DefaultBeanFactory implements BeanFactory{
                                 proxyBean = method1.invoke(bean, args);
                                 costTime = System.nanoTime() - start;
                             } catch (InvocationTargetException e) {
-                                throw e.getTargetException();  //拆开被包装的异常,让调用放可以catch到原始异常
+                               throw e.getTargetException();  //拆开被包装的异常,让调用放可以catch到原始异常
                             }catch (IllegalAccessException e){
                                 throw new BeanCreationException("代理调用失败: " + beanName, e);
                             }
-                            System.out.println(bean.getClass().getName() + "#" + method1.getName() + "耗时: " + costTime + "ms");
+                            System.out.println(bean.getClass().getName() + "#" + method1.getName() + "耗时: " + costTime + "ns");
                             return proxyBean;
                         });
             }

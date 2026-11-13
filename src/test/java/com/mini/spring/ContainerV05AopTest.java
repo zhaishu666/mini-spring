@@ -59,4 +59,13 @@ public class ContainerV05AopTest {
         assertTrue(Proxy.isProxyClass(node.getClass()));
         assertSame(node, node.next());
     }
+
+    @Test
+    @DisplayName("业务异常穿透代理 异常不被包装")
+    void business_exception_passes_through_proxy(){
+        GreetingService svc = factory.getBean(GreetingService.class);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, svc::boom);
+        assertEquals("boom", ex.getMessage());
+    }
 }
