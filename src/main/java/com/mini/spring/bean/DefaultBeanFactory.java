@@ -24,8 +24,11 @@ public class DefaultBeanFactory implements BeanFactory{
 
     private final List<BeanPostProcessor> beanPostProcessors = new CopyOnWriteArrayList<>();
 
-    /* Spring里是Map<Object, Object> (cacheKey -> bean) 这里仅需要记录谁被提前代理过,简化写法 */
+    /** Spring里是Map<Object, Object> (cacheKey -> bean) 这里仅需要记录谁被提前代理过,简化写法 */
     private final Set<String> earlyProxyReferences = ConcurrentHashMap.newKeySet();
+
+    /** Names of beans that are currently in creation. */
+    /* private final Set<String> singletonsCurrentlyInCreation = ConcurrentHashMap.newKeySet(16);*/
 
     public DefaultBeanFactory(BeanDefinitionRegistry registry) {
         this.registry = Objects.requireNonNull(registry,"registry不能为null");
@@ -82,7 +85,7 @@ public class DefaultBeanFactory implements BeanFactory{
             final Object rawInstance = instance;
             singletonFactories.put(name, () -> getEarlyReference(name, rawInstance));  //此时放进去的是lambda表达式,只有在真正调用getObject时才会执行
 
-            exposed = rawInstance;  //rawInstance和exposed在有循环依赖和BPP替换时不一致,v0.5处理
+            exposed = rawInstance;  //rawInstance和exposed在有循环依赖和BPP替换时不一致,v0.5处理(已处理)
 
             populateBean(exposed);  //依赖注入
 
@@ -125,7 +128,7 @@ public class DefaultBeanFactory implements BeanFactory{
 
         ObjectFactory<?> factory = singletonFactories.get(name); //二级缓存找不到,再从三级缓存找
         if(factory == null) return null;
-        Object factoryObject = factory.getObject();
+        Object factoryObject = factory.getObject();  //动态分配,return的是getEarlyReference()的结果
         if(factoryObject == null) return null;  //防御性判断,v0.3下不可达
 
         earlySingletonObjects.put(name, factoryObject);
